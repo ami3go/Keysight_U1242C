@@ -6,7 +6,9 @@ import time
 if __name__ == "__main__":
     try:
         inst = temperature.com_interface()
-        inst.init("COM10")
+        inst.init("COM14")
+        inst2 = temperature.com_interface()
+        inst2.init("COM12")
 
         for i in range(1000):
             temp = float(inst.get_data())
