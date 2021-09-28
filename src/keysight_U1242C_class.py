@@ -13,19 +13,13 @@ def range_check(val, min, max, val_name):
     return val
 
 
-
-
-
-
-
-
 class com_interface:
     def __init__(self):
         # Commands Subsystem
         # this is the list of Subsystem commands
         # super(communicator, self).__init__(port="COM10",baudrate=115200, timeout=0.1)
-        print("communicator init")
-        self.cmd = None
+        # print("Communicator init")
+        self.cmd = storage()
         self.ser = None
 
     def init(self, com_port, baudrate_var=9600):
@@ -46,7 +40,8 @@ class com_interface:
                 self.ser.open()
 
             read_back = self.query('*IDN?')
-            print(f"Connected to: {read_back}")
+            conf = self.get_conf()
+            print(f"Connected to: {read_back.strip()}, configured as {conf.strip()}")
             return True
 
     def send(self, txt):
@@ -66,6 +61,15 @@ class com_interface:
     def close(self):
         self.ser.close()
         self.ser = None
+
+    def get_data(self):
+        return self.query(self.cmd.measure.req())
+
+    def get_conf(self):
+        return self.query(self.cmd.conf.req())
+
+    def get_battery(self):
+        return self.query(self.cmd.battely_level.req())
 
 
 class req3:
@@ -97,18 +101,6 @@ class str_and_req:
     def req(self):
         return self.cmd + "?"
 
-
-class dig_param3:
-    def __init__(self, prefix, min, max):
-        self.prefix = prefix
-        self.cmd = self.prefix
-        self.max = max
-        self.min = min
-
-    def val(self, count=0):
-        count = range_check(count, self.min, self.max, "MAX count")
-        txt = f'{self.cmd} {count}'
-        return txt
 
 
 class storage:
