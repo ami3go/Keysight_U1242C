@@ -1,4 +1,6 @@
 # import pyvisa # PyVisa info @ http://PyVisa.readthedocs.io/en/stable/
+import time
+
 import serial
 import serial.tools.list_ports
 
@@ -41,7 +43,16 @@ class com_interface:
 
             read_back = self.query('*IDN?')
             conf = self.get_conf()
-            print(f"Connected to: {read_back.strip()}, configured as {conf.strip()}")
+            bat_level = self.get_battery()
+            print(f"Connected to: {read_back.strip()}, configured as {conf.strip()}, battery: {bat_level} ")
+            bat_level = bat_level.replace("%", "")
+
+            if float(bat_level) <= 30:
+                print(f"!!! WARNING !!! LOW BATTERY {bat_level}!!!")
+                time.sleep(5)
+            if float(bat_level) <= 15:
+                print(f"!!! WARNING !!! VERY LOW BATTERY {bat_level}!!!")
+                time.sleep(30)
             return True
 
     def send(self, txt):
@@ -49,6 +60,7 @@ class com_interface:
         txt = f'{txt}\r\n'
         # print(f'Sending: {txt}')
         self.ser.write(txt.encode())
+        # time.sleep(0.25)
 
     def query(self, cmd_srt):
         txt = f'{cmd_srt}\r\n'
@@ -71,6 +83,19 @@ class com_interface:
     def get_battery(self):
         return self.query(self.cmd.battely_level.req())
 
+    def reset(self):
+        self.send(self.cmd.reset.str())
+
+    def beep(self):
+        self.send(self.cmd.beep.str())
+
+    def back_light(self, on_off):
+        if on_off == 0:
+            self.send(self.cmd.black_light_off.str())
+        else:
+            self.send(self.cmd.black_light_on.str())
+
+
 
 class req3:
     def __init__(self, prefix):
@@ -90,19 +115,6 @@ class str3:
         return self.cmd
 
 
-class str_and_req:
-    def __init__(self, prefix):
-        self.prefix = prefix
-        self.cmd = self.prefix
-
-    def str(self, ):
-        return self.cmd
-
-    def req(self):
-        return self.cmd + "?"
-
-
-
 class storage:
     def __init__(self):
         self.cmd = None
@@ -111,7 +123,10 @@ class storage:
         self.measure = req3("FETC")
         self.conf = req3("CONF")
         self.battely_level = req3("SYST:BATT")
-
+        self.reset = str3("*RST")
+        self.beep = str3("SYST:BEEP")
+        self.black_light_on = str3("SYST:BLIT 1")
+        self.black_light_off = str3("SYST:BLIT 0")
 
 
 
