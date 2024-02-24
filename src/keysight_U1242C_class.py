@@ -1,27 +1,27 @@
 # import pyvisa # PyVisa info @ http://PyVisa.readthedocs.io/en/stable/
 import time
-
 import serial
 import serial.tools.list_ports
 
 
-def range_check(val, min, max, val_name):
-    if val > max:
-        print(f"Wrong {val_name}: {val}. Max value should be less then {max}")
-        val = max
-    if val < min:
-        print(f"Wrong {val_name}: {val}. Should be >= {min}")
-        val = min
-    return val
+def range_check(val, min_val, max_val, val_name):
+    if val > max_val:
+        print(f"Wrong {val_name}: {val}. Max value should be less than {max_val}")
+        return max_val
+    elif val < min_val:
+        print(f"Wrong {val_name}: {val}. Should be >= {min_val}")
+        return min_val
+    else:
+        return val
 
 
-class com_interface:
+class u1242c:
     def __init__(self):
         # Commands Subsystem
         # this is the list of Subsystem commands
         # super(communicator, self).__init__(port="COM10",baudrate=115200, timeout=0.1)
         # print("Communicator init")
-        self.cmd = storage()
+        self.cmd = _Storage()
         self.ser = None
 
     def init(self, com_port, baudrate_var=9600):
@@ -41,7 +41,7 @@ class com_interface:
             if not self.ser.isOpen:
                 self.ser.open()
 
-            read_back = self.query('*IDN?')
+            read_back = self._query('*IDN?')
             conf = self.get_conf()
             bat_level = self.get_battery()
             print(f"Connected to: {read_back.strip()}, configured as {conf.strip()}, battery: {bat_level} ")
@@ -55,14 +55,14 @@ class com_interface:
                 time.sleep(30)
             return True
 
-    def send(self, txt):
+    def _send(self, txt):
         # will put sending command here
         txt = f'{txt}\r\n'
         # print(f'Sending: {txt}')
         self.ser.write(txt.encode())
         # time.sleep(0.25)
 
-    def query(self, cmd_srt):
+    def _query(self, cmd_srt):
         txt = f'{cmd_srt}\r\n'
         self.ser.reset_input_buffer()
         self.ser.write(txt.encode())
@@ -75,29 +75,29 @@ class com_interface:
         self.ser = None
 
     def get_data(self):
-        return self.query(self.cmd.measure.req())
+        return self._query(self.cmd.measure.req())
 
     def get_conf(self):
-        return self.query(self.cmd.conf.req())
+        return self._query(self.cmd.conf.req())
 
     def get_battery(self):
-        return self.query(self.cmd.battely_level.req())
+        return self._query(self.cmd.battely_level.req())
 
     def reset(self):
-        self.send(self.cmd.reset.str())
+        self._send(self.cmd.reset.str())
 
     def beep(self):
-        self.send(self.cmd.beep.str())
+        self._send(self.cmd.beep.str())
 
     def back_light(self, on_off):
         if on_off == 0:
-            self.send(self.cmd.black_light_off.str())
+            self._send(self.cmd.black_light_off.str())
         else:
-            self.send(self.cmd.black_light_on.str())
+            self._send(self.cmd.black_light_on.str())
 
 
 
-class req3:
+class _req3:
     def __init__(self, prefix):
         self.prefix = prefix
         self.cmd = self.prefix
@@ -106,7 +106,7 @@ class req3:
         return self.cmd + "?"
 
 
-class str3:
+class _str3:
     def __init__(self, prefix):
         self.prefix = prefix
         self.cmd = self.prefix
@@ -115,18 +115,18 @@ class str3:
         return self.cmd
 
 
-class storage:
+class _Storage:
     def __init__(self):
         self.cmd = None
         self.prefix = None
-        self.idn = req3("*IDN")
-        self.measure = req3("FETC")
-        self.conf = req3("CONF")
-        self.battely_level = req3("SYST:BATT")
-        self.reset = str3("*RST")
-        self.beep = str3("SYST:BEEP")
-        self.black_light_on = str3("SYST:BLIT 1")
-        self.black_light_off = str3("SYST:BLIT 0")
+        self.idn = _req3("*IDN")
+        self.measure = _req3("FETC")
+        self.conf = _req3("CONF")
+        self.battely_level = _req3("SYST:BATT")
+        self.reset = _str3("*RST")
+        self.beep = _str3("SYST:BEEP")
+        self.black_light_on = _str3("SYST:BLIT 1")
+        self.black_light_off = _str3("SYST:BLIT 0")
 
 
 
@@ -136,15 +136,15 @@ if __name__ == '__main__':
     # dev = LOG_34970A()
     # dev.init("COM10")
     # dev.send("COM10 send")
-    cmd = storage()
+    cmd = _Storage()
     print("")
     print("TOP LEVEL")
     print("*" * 150)
-    inst = com_interface()
+    inst = u1242c()
     inst.init("COM16")
-    print(inst.query(cmd.idn.req()))
-    print(inst.query(cmd.battely_level.req()))
-    print(inst.query(cmd.measure.req()))
-    print(inst.query(cmd.conf.req()))
+    print(inst._query(cmd.idn.req()))
+    print(inst._query(cmd.battely_level.req()))
+    print(inst._query(cmd.measure.req()))
+    print(inst._query(cmd.conf.req()))
     inst.close()
 
