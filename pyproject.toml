@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keysight-u1242c"
+version = "0.1.0"
+description = "Production-oriented Python serial driver for the Keysight U1242C handheld digital multimeter."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Project Maintainers" }]
+keywords = ["keysight", "u1242c", "multimeter", "serial", "instrument", "logging"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "License :: Other/Proprietary License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+dependencies = ["pyserial>=3.5"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "black>=24",
+    "ruff>=0.6",
+    "pandas>=2",
+    "build>=1",
+]
+
+[project.scripts]
+u1242c-log = "keysight_u1242c.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/your-org/keysight-u1242c"
+Issues = "https://github.com/your-org/keysight-u1242c/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests", "examples"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
