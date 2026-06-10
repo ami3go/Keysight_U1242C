@@ -44,16 +44,17 @@ Homepage = "https://github.com/your-org/keysight-u1242c"
 Issues = "https://github.com/your-org/keysight-u1242c/issues"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["keysight_u1242c*"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests", "examples"]
+src = ["keysight_u1242c", "tests", "examples"]
 
 [tool.black]
 line-length = 100

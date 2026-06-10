@@ -12,6 +12,21 @@ The package replaces a simple script-style serial class with a testable installa
 - command-line logging through `u1242c-log`
 - unit tests with fake serial transport, no hardware required
 
+
+## Repository layout
+
+This repository uses a flat installable package layout, as requested:
+
+```text
+keysight_u1242c/
+tests/
+examples/
+docs/
+pyproject.toml
+```
+
+The package is installable directly from the repository root with `python -m pip install -e .`.
+
 ## Installation
 
 ```bash
