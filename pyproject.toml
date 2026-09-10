@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "keysight-u1242c"
+version = "0.2.0"
+description = "SCPI driver for the Keysight U1242C handheld digital multimeter"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Alexandr Chasnyk", email = "alexandr.chasnyk@gmail.com" }]
+keywords = ["scpi", "keysight", "u1242c", "multimeter", "instrumentation"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+  "Topic :: System :: Hardware :: Hardware Drivers",
+]
+dependencies = [
+  "scpi-driver-core[serial] @ git+https://github.com/ami3go/scpi-driver-core.git",
+]
+
+[project.urls]
+Homepage = "https://github.com/ami3go/Keysight_U1242C"
+Repository = "https://github.com/ami3go/Keysight_U1242C"
+Issues = "https://github.com/ami3go/Keysight_U1242C/issues"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["keysight_u1242c"]

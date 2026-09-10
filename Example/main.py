@@ -1,7 +1,8 @@
-import time
-from keysight_U1242C_class import u1242c
 import csv
 from datetime import datetime
+
+from keysight_u1242c import U1242C
+
 
 def excel_ready_timestamp(dt):
     """
@@ -13,35 +14,24 @@ def excel_ready_timestamp(dt):
     # Excel timestamp format: 'yyyy-mm-dd hh:mm:ss'
     return dt.strftime('%Y-%m-%d %H:%M:%S')
 
-# Example usage:
-now = datetime.now()  # Get current datetime
-excel_timestamp = excel_ready_timestamp(now)
-print(excel_timestamp)
-
-
 
 def main():
+    header = [['Timestamp', 'Resistance, Ohm']]
 
-    # Your main code goes here
-    header = [['Register', 'Resistance, Ohm']]
-
-    dmm = u1242c()
-    dmm.init("/dev/ttyUSB1")
     file_name = 'data.csv'
     file = open(file_name, 'w', newline='')
     writer = csv.writer(file)
     writer.writerows(header)
 
-    for i in range(0,1024,1):
-        
-        dmm_meas = round(float(dmm.get_data()), 3)
-        now = datetime.now()  # Get current datetime
-        excel_timestamp = excel_ready_timestamp(now)
-        meas = [excel_timestamp, dmm_meas]
+    with U1242C("/dev/ttyUSB1") as dmm:
+        for _ in range(1024):
+            dmm_meas = round(dmm.get_data(), 3)
+            excel_timestamp = excel_ready_timestamp(datetime.now())
+            writer.writerow([excel_timestamp, dmm_meas])
+            file.flush()
+            print(f"Time: {excel_timestamp}, meas: {dmm_meas}")
 
-        writer.writerow(meas)
-        file.flush()
-        print(f"Time: {excel_ready_timestamp}, meas: {dmm_meas}")
+    file.close()
 
 
 if __name__ == "__main__":

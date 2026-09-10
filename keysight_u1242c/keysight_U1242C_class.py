@@ -1,150 +1,95 @@
-# import pyvisa # PyVisa info @ http://PyVisa.readthedocs.io/en/stable/
+"""Driver for the Keysight U1242C handheld multimeter.
+
+Talks SCPI over the instrument's USB-serial interface, built on
+scpi-driver-core (https://github.com/ami3go/scpi-driver-core) for the
+transport, framing, and session lifecycle. This module only adds the
+U1242C-specific commands.
+"""
+
+from __future__ import annotations
+
 import time
-import serial
-import serial.tools.list_ports
+
+from scpi_driver_core import ScpiClient, ScpiSession
+from scpi_driver_core.scpi import ScpiTextCodec
+from scpi_driver_core.transport import SerialTransport
+
+__all__ = ["U1242C"]
+
+_LOW_BATTERY_PERCENT = 30.0
+_CRITICAL_BATTERY_PERCENT = 15.0
 
 
-def range_check(val, min_val, max_val, val_name):
-    if val > max_val:
-        print(f"Wrong {val_name}: {val}. Max value should be less than {max_val}")
-        return max_val
-    elif val < min_val:
-        print(f"Wrong {val_name}: {val}. Should be >= {min_val}")
-        return min_val
-    else:
-        return val
+class U1242C:
+    """Driver for the Keysight U1242C, over its USB-serial SCPI interface.
 
+    Args:
+        port: serial device, e.g. ``"COM16"`` or ``"/dev/ttyUSB0"``.
+        baudrate: matches the instrument's USB-serial setting; 9600 by default.
+        timeout_s: bound for each read/write on the connection.
+    """
 
-class u1242c:
-    def __init__(self):
-        # Commands Subsystem
-        # this is the list of Subsystem commands
-        # super(communicator, self).__init__(port="COM10",baudrate=115200, timeout=0.1)
-        # print("Communicator init")
-        self.cmd = _Storage()
-        self.ser = None
+    def __init__(self, port: str, *, baudrate: int = 9600, timeout_s: float = 2.0) -> None:
+        transport = SerialTransport(port, baudrate=baudrate, timeout_s=timeout_s)
+        # The instrument answers with bare "\n"-terminated lines but tolerates
+        # (and the original driver always sent) a "\r\n" command terminator.
+        codec = ScpiTextCodec(command_terminator=b"\r\n", response_terminator=b"\n")
+        self.session = ScpiSession("u1242c", ScpiClient(transport, codec=codec))
 
-    def init(self, com_port, baudrate_var=9600):
-        com_port_list = [comport.device for comport in serial.tools.list_ports.comports()]
-        if com_port not in com_port_list:
-            print("COM port is not found")
-            print("Please ensure that USB is connected")
-            print(f"Please check COM port Number. Currently it is {com_port} ")
-            print(f'Founded COM ports:{com_port_list}')
-            return False
-        else:
-            self.ser = serial.Serial(
-                port=com_port,
-                baudrate=baudrate_var,
-                timeout=0.1
-            )
-            if not self.ser.isOpen:
-                self.ser.open()
+    def __enter__(self) -> "U1242C":
+        self.init()
+        return self
 
-            read_back = self._query('*IDN?')
-            conf = self.get_conf()
-            bat_level = self.get_battery()
-            print(f"Connected to: {read_back.strip()}, configured as {conf.strip()}, battery: {bat_level} ")
-            bat_level = bat_level.replace("%", "")
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
-            if float(bat_level) <= 30:
-                print(f"!!! WARNING !!! LOW BATTERY {bat_level}!!!")
-                time.sleep(5)
-            if float(bat_level) <= 15:
-                print(f"!!! WARNING !!! VERY LOW BATTERY {bat_level}!!!")
-                time.sleep(30)
-            return True
+    def init(self) -> None:
+        """Open the connection, confirm the instrument responds, and report its state.
 
-    def _send(self, txt):
-        # will put sending command here
-        txt = f'{txt}\r\n'
-        # print(f'Sending: {txt}')
-        self.ser.write(txt.encode())
-        # time.sleep(0.25)
+        Raises:
+            ScpiDriverError: if the port cannot be opened or the instrument
+                does not answer ``*IDN?``.
+        """
+        self.session.open()
+        # get_identity() both confirms the instrument answers and caches its *IDN?.
+        identity = self.session.get_identity()
+        conf = self.get_conf()
+        battery = self.get_battery_percent()
+        print(f"Connected to: {identity.raw}, configured as {conf}, battery: {battery:.0f}%")
 
-    def _query(self, cmd_srt):
-        txt = f'{cmd_srt}\r\n'
-        self.ser.reset_input_buffer()
-        self.ser.write(txt.encode())
-        # print(f'Query: {txt}')
-        return_val = self.ser.readline().decode()
-        return return_val
+        if battery <= _CRITICAL_BATTERY_PERCENT:
+            print(f"!!! WARNING !!! VERY LOW BATTERY {battery:.0f}% !!!")
+            time.sleep(30)
+        elif battery <= _LOW_BATTERY_PERCENT:
+            print(f"!!! WARNING !!! LOW BATTERY {battery:.0f}% !!!")
+            time.sleep(5)
 
-    def close(self):
-        self.ser.close()
-        self.ser = None
+    def close(self) -> None:
+        self.session.close()
 
-    def get_data(self):
-        return self._query(self.cmd.measure.req())
+    # -- measurement --------------------------------------------------
 
-    def get_conf(self):
-        return self._query(self.cmd.conf.req())
+    def get_data(self) -> float:
+        """FETC?: the current primary measurement."""
+        return self.session.client.query_float("FETC?")
 
-    def get_battery(self):
-        return self._query(self.cmd.battely_level.req())
+    def get_conf(self) -> str:
+        """CONF?: the active measurement configuration."""
+        return self.session.client.query("CONF?")
 
-    def reset(self):
-        self._send(self.cmd.reset.str())
+    def get_battery_percent(self) -> float:
+        """SYST:BATT?: remaining battery charge, as a percentage."""
+        reading = self.session.client.query("SYST:BATT?")
+        return float(reading.replace("%", "").strip())
 
-    def beep(self):
-        self._send(self.cmd.beep.str())
+    def reset(self) -> None:
+        """*RST: return the instrument to its power-on default state."""
+        self.session.client.write("*RST")
 
-    def back_light(self, on_off):
-        if on_off == 0:
-            self._send(self.cmd.black_light_off.str())
-        else:
-            self._send(self.cmd.black_light_on.str())
+    def beep(self) -> None:
+        """SYST:BEEP: sound the instrument's beeper once."""
+        self.session.client.write("SYST:BEEP")
 
-
-
-class _req3:
-    def __init__(self, prefix):
-        self.prefix = prefix
-        self.cmd = self.prefix
-
-    def req(self):
-        return self.cmd + "?"
-
-
-class _str3:
-    def __init__(self, prefix):
-        self.prefix = prefix
-        self.cmd = self.prefix
-
-    def str(self, ):
-        return self.cmd
-
-
-class _Storage:
-    def __init__(self):
-        self.cmd = None
-        self.prefix = None
-        self.idn = _req3("*IDN")
-        self.measure = _req3("FETC")
-        self.conf = _req3("CONF")
-        self.battely_level = _req3("SYST:BATT")
-        self.reset = _str3("*RST")
-        self.beep = _str3("SYST:BEEP")
-        self.black_light_on = _str3("SYST:BLIT 1")
-        self.black_light_off = _str3("SYST:BLIT 0")
-
-
-
-
-
-if __name__ == '__main__':
-    # dev = LOG_34970A()
-    # dev.init("COM10")
-    # dev.send("COM10 send")
-    cmd = _Storage()
-    print("")
-    print("TOP LEVEL")
-    print("*" * 150)
-    inst = u1242c()
-    inst.init("COM16")
-    print(inst._query(cmd.idn.req()))
-    print(inst._query(cmd.battely_level.req()))
-    print(inst._query(cmd.measure.req()))
-    print(inst._query(cmd.conf.req()))
-    inst.close()
-
+    def back_light(self, on: bool) -> None:
+        """SYST:BLIT: turn the display backlight on or off."""
+        self.session.client.write(f"SYST:BLIT {1 if on else 0}")
