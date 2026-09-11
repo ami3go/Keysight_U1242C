@@ -66,3 +66,18 @@ battery level. Connection failures raise `scpi_driver_core` exceptions
 | `back_light(on: bool)` | `SYST:BLIT` | Turn the display backlight on or off. |
 
 See `Example/main.py` for a full example that logs measurements to a CSV file.
+
+## AI Driver Contract
+
+[`ai/ai_contract.yaml`](ai/ai_contract.yaml) (with its integrity lock file
+[`ai/ai_contract.lock`](ai/ai_contract.lock)) is a machine-readable
+description of this driver's public API — mental model, state machine,
+capabilities, error catalogue, safety rules, and known limitations — written
+to the [LPDS-017 AI Driver Contract](https://github.com/ami3go/Lab-equipment-pyDrivers/blob/main/AI_Guides/LPDS-017_AI_Driver_Contract.md)
+schema from the [Lab pyDrivers Standard (LPDS)](https://github.com/ami3go/Lab-equipment-pyDrivers/blob/main/AI_Guides/README.md).
+It lets an AI agent plan against this driver without reading its source.
+
+This repo has **not** adopted the rest of the LPDS platform (canonical
+LPDS-002 method names, the shared `lpds-core` base class, `src/`-layout
+packaging, protocol-conformance test suites, etc.) — see the contract's
+`limitations` section for the full, honest list of gaps.

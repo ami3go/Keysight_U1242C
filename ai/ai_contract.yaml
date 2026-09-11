@@ -1,0 +1,339 @@
+# LPDS-017 AI Driver Contract for the Keysight U1242C driver.
+#
+# This contract describes the driver's public Python API exactly as it exists
+# today. It intentionally does NOT claim full LPDS platform conformance: this
+# repository has not adopted lpds-core (LPDS-003), LPDS-002 canonical method
+# naming, an LPDS-015 plugin manifest, or an LPDS-013 capability model. Where
+# a field below references one of those specifications, it is a best-effort,
+# provisional mapping documented as such rather than a conformance claim. See
+# "limitations" for the full list of known gaps against LPDS-001/002/003/015.
+
+identity:
+  contract_schema_version: "3.0"
+  plugin_id: keysight_u1242c            # provisional: no LPDS-015 manifest exists yet
+  driver_name: keysight_u1242c
+  distribution_name: keysight-u1242c
+  distribution_version: "0.2.0"
+  driver_import_path: keysight_u1242c.keysight_U1242C_class
+  driver_class: U1242C
+  supported_models:
+    - Keysight U1242C
+
+mental_model: >
+  The U1242C is a handheld digital multimeter reachable over a USB-serial
+  SCPI interface. It has no programmable output, source, or hazardous state:
+  it only measures and reports. An agent operates it by constructing a
+  U1242C(port) instance (no I/O happens yet), calling init() once (or using
+  the driver as a context manager) to open the serial connection and confirm
+  the instrument answers, then issuing any number of read-only queries
+  (get_data, get_conf, get_battery_percent) or simple fire-and-forget
+  commands (beep, back_light, reset), then calling close() (or exiting the
+  `with` block). Only one session per U1242C instance is supported; there is
+  no multi-connection or channel-selection capability.
+
+state_machine:
+  reference: LPDS-003 §13.1 canonical connection/session state enum
+  states_used:
+    - DISCONNECTED   # before init(), or after close()
+    - CONNECTING     # inside init(), while the serial port is being opened
+    - CONNECTED       # after init() returns successfully
+    - ERROR           # transport faulted (e.g. I/O failure); session is not usable
+    - CLOSING         # inside close(), while the transport is releasing its resource
+  notes: >
+    This driver does not use CONFIGURED, BUSY, WAITING, or RECOVERING: it has
+    no device configuration step distinct from CONNECTED, executes each
+    operation synchronously with no waiting state, and performs no automatic
+    recovery. No driver-specific sub-states are added.
+
+resources:
+  - resource_id: serial_port
+    kind: exclusive
+    description: >
+      The USB-serial port passed to the U1242C constructor (e.g. "COM16" or
+      "/dev/ttyUSB0"). Held exclusively by the underlying pyserial connection
+      from init() until close(). Only one U1242C instance should hold a given
+      port at a time.
+  - resource_id: session_alias
+    kind: internal
+    description: >
+      A single hardcoded scpi_driver_core.ScpiSession alias ("u1242c") per
+      U1242C instance. Not exposed as a caller-facing "alias" argument;
+      multi-connection (LPDS-002 §9.1) is not implemented.
+
+dependencies:
+  required:
+    - name: scpi-driver-core
+      extra: serial
+      source: "git+https://github.com/ami3go/scpi-driver-core.git"
+      provides: [SerialTransport, ScpiClient, ScpiSession, ScpiTextCodec]
+    - name: pyserial
+      via: scpi-driver-core[serial]
+    - name: python
+      version: ">=3.10"
+  optional: []
+
+capabilities:
+  - method: init
+    capability_id: connection.session.open   # provisional LPDS-013-style id; no LPDS-013 model implemented
+    signature: "init(self) -> None"
+    purpose: >
+      Open the serial connection, confirm the instrument answers *IDN?, and
+      report identity, active configuration, and battery level.
+    inputs: []
+    outputs:
+      type: "None"
+      description: prints a one-line connection summary; state is observable via session.is_connected afterward.
+    preconditions: [DISCONNECTED]
+    postconditions: [CONNECTED]
+    side_effects:
+      - opens the serial port
+      - sends "*IDN?", "CONF?", "SYST:BATT?"
+      - may sleep 5s (battery <= 30%) or 30s (battery <= 15%) before returning
+    risk_level: low
+    timing: "typically < 1s; add up to 30s when battery is low (see side_effects)"
+    stabilization_delay: none
+    retry_policy: "none (scpi_driver_core default: no automatic retry)"
+    errors: [transport_open_failed, transport_timeout, identity_invalid, response_unparsable]
+    exclusive_resources: [serial_port]
+
+  - method: close
+    capability_id: connection.session.close
+    signature: "close(self) -> None"
+    purpose: Close the serial connection and release the port.
+    inputs: []
+    outputs: {type: "None"}
+    preconditions: [CONNECTED, ERROR, DISCONNECTED]
+    postconditions: [DISCONNECTED]
+    side_effects: [closes the serial port]
+    risk_level: none
+    timing: "< 100ms typical"
+    stabilization_delay: none
+    retry_policy: none
+    errors: []
+    exclusive_resources: [serial_port]
+    idempotent: true
+
+  - method: get_data
+    capability_id: measurement.primary.read
+    signature: "get_data(self) -> float"
+    purpose: Read the instrument's current primary measurement (FETC?).
+    inputs: []
+    outputs: {type: float, description: "the measured value in the unit implied by the active configuration (see get_conf); no unit conversion is applied"}
+    preconditions: [CONNECTED]
+    postconditions: [CONNECTED]
+    side_effects: ['sends "FETC?"']
+    risk_level: none
+    timing: "< timeout_s (default 2.0s)"
+    stabilization_delay: none
+    retry_policy: none
+    errors: [transport_timeout, response_unparsable]
+    exclusive_resources: [serial_port]
+
+  - method: get_conf
+    capability_id: configuration.active.read
+    signature: "get_conf(self) -> str"
+    purpose: Read the instrument's active measurement configuration (CONF?).
+    inputs: []
+    outputs: {type: str, description: "raw quoted configuration string as returned by the instrument, e.g. \"TEMP:K CEL\""}
+    preconditions: [CONNECTED]
+    postconditions: [CONNECTED]
+    side_effects: ['sends "CONF?"']
+    risk_level: none
+    timing: "< timeout_s (default 2.0s)"
+    stabilization_delay: none
+    retry_policy: none
+    errors: [transport_timeout]
+    exclusive_resources: [serial_port]
+
+  - method: get_battery_percent
+    capability_id: diagnostics.battery.read
+    signature: "get_battery_percent(self) -> float"
+    purpose: Read remaining battery charge as a percentage (SYST:BATT?).
+    inputs: []
+    outputs: {type: float, description: "0-100"}
+    preconditions: [CONNECTED]
+    postconditions: [CONNECTED]
+    side_effects: ['sends "SYST:BATT?"']
+    risk_level: none
+    timing: "< timeout_s (default 2.0s)"
+    stabilization_delay: none
+    retry_policy: none
+    errors: [transport_timeout, response_unparsable]
+    exclusive_resources: [serial_port]
+
+  - method: reset
+    capability_id: device.state.reset
+    signature: "reset(self) -> None"
+    purpose: Return the instrument to its power-on default state (*RST).
+    inputs: []
+    outputs: {type: "None"}
+    preconditions: [CONNECTED]
+    postconditions: [CONNECTED]
+    side_effects:
+      - sends "*RST"
+      - changes the active measurement configuration to the instrument's power-on default; a subsequent get_conf() will reflect this
+    risk_level: low
+    timing: "command is fire-and-forget; instrument re-initialization time after *RST is UNKNOWN (not queried)"
+    stabilization_delay: UNKNOWN
+    retry_policy: "none; not idempotent-verified, not automatically retried"
+    errors: [transport_timeout]
+    exclusive_resources: [serial_port]
+
+  - method: beep
+    capability_id: device.indicator.beep
+    signature: "beep(self) -> None"
+    purpose: Sound the instrument's beeper once (SYST:BEEP).
+    inputs: []
+    outputs: {type: "None"}
+    preconditions: [CONNECTED]
+    postconditions: [CONNECTED]
+    side_effects:
+      - 'sends "SYST:BEEP"'
+      - audible beep on the physical instrument
+    risk_level: none
+    timing: "command is fire-and-forget, < 100ms"
+    stabilization_delay: none
+    retry_policy: none
+    errors: [transport_timeout]
+    exclusive_resources: [serial_port]
+
+  - method: back_light
+    capability_id: device.display.backlight_set
+    signature: "back_light(self, on: bool) -> None"
+    purpose: Turn the instrument's display backlight on or off (SYST:BLIT).
+    inputs:
+      - name: on
+        type: bool
+        required: true
+        description: "true = backlight on, false = backlight off"
+    outputs: {type: "None"}
+    preconditions: [CONNECTED]
+    postconditions: [CONNECTED]
+    side_effects:
+      - 'sends "SYST:BLIT 1" or "SYST:BLIT 0"'
+      - changes visible display backlight state
+    risk_level: none
+    timing: "command is fire-and-forget, < 100ms"
+    stabilization_delay: none
+    retry_policy: none
+    errors: [transport_timeout]
+    exclusive_resources: [serial_port]
+
+error_catalogue:
+  - error_code: LPDS-CFG-001
+    exception_class: scpi_driver_core.exceptions.ConfigurationError
+    condition: "invalid constructor or client argument, e.g. empty port, non-positive baudrate/timeout"
+    retryable: "no"
+    recovery: "fix the argument and reconstruct the driver"
+  - error_code: LPDS-CON-001
+    exception_class: scpi_driver_core.exceptions.NotConnectedError
+    condition: "an operation was attempted before init() or after close()"
+    retryable: "no"
+    recovery: "call init() first"
+  - error_code: LPDS-TRA-001
+    exception_class: scpi_driver_core.exceptions.TransportError
+    condition: "the serial port could not be opened, or a low-level I/O failure occurred"
+    retryable: "no"
+    recovery: "check the port path/permissions and cabling, then retry init()"
+  - error_code: LPDS-TMO-001
+    exception_class: scpi_driver_core.exceptions.TransportTimeoutError
+    condition: "no response (or no terminator) within timeout_s"
+    retryable: "yes, at the caller's discretion; the driver does not auto-retry"
+    recovery: "check cabling/power, verify the instrument is not busy, retry the call"
+  - error_code: LPDS-PROTO-001
+    exception_class: scpi_driver_core.exceptions.ResponseParseError
+    condition: "get_data()/get_battery_percent() received a reply that could not be parsed as a number"
+    retryable: "yes, at the caller's discretion"
+    recovery: "inspect the raw reply (exception carries it on .raw); the instrument may be in an unexpected mode"
+  - error_code: LPDS-IDN-001
+    exception_class: scpi_driver_core.exceptions.IdentityError
+    condition: "init() received an *IDN? reply with no manufacturer/model fields"
+    retryable: "yes, at the caller's discretion"
+    recovery: "verify the correct device/port is connected"
+
+safety_rules:
+  - rule: >
+      This driver has no output, source, energize, or destructive capability:
+      it is a read-only measurement instrument plus three benign commands
+      (beep, backlight, reset). No capability above "low" risk exists.
+    enforced_by: driver design (no such methods are exposed)
+  - rule: >
+      reset() changes the active measurement configuration to the
+      instrument's power-on default. An agent relying on a specific
+      configuration having been set by an earlier call should re-apply it
+      (via the physical instrument controls; this driver has no set_conf)
+      after calling reset().
+    enforced_by: advisory only; not enforced in code
+
+verification_objectives:
+  - objective: "init() succeeds"
+    oracle: "init() returns without raising, and session.is_connected is True afterward"
+  - objective: "identity is meaningful"
+    oracle: "the identity string obtained via session.get_identity().raw is non-empty and contains the driver's declared model"
+  - objective: "get_data() returns a real measurement"
+    oracle: "the returned float is finite (not NaN/inf)"
+  - objective: "get_battery_percent() is in range"
+    oracle: "0.0 <= returned value <= 100.0"
+  - objective: "close() is safe to call repeatedly"
+    oracle: "calling close() a second time does not raise"
+
+setup_teardown_contract:
+  setup:
+    - "construct U1242C(port, baudrate=..., timeout_s=...) -- this performs no I/O"
+    - "call init() (or enter a `with U1242C(port) as dmm:` block, which calls init() automatically)"
+  teardown:
+    - "call close() (or exit the `with` block, which calls close() automatically)"
+    - "close() is idempotent and safe to call even if init() never succeeded, as long as the instance was constructed"
+
+limitations:
+  - "This driver does not implement LPDS-002 canonical method names (connect/disconnect/is_connected/get_identity/get_driver_information/get_driver_capabilities/set_communication_timeout/get_communication_timeout/check_communication). init()/close() are this driver's connect/disconnect equivalents; there is no is_connected(), get_driver_information(), or get_driver_capabilities() method yet."
+  - "This driver does not depend on lpds-core / LPDS-003 BaseInstrument; it is built directly on scpi-driver-core (a different, SCPI-transport-focused shared library), so the state machine and error categories above are a best-effort mapping onto LPDS-003/LPDS-007 vocabulary rather than a native implementation of them."
+  - "No LPDS-015 plugin manifest exists yet; plugin_id above is provisional."
+  - "No LPDS-013 capability model (get_capability_model()) is implemented; capability_id values above are provisional and not cross-checked against a real capability model."
+  - "No LPDS-019 protocol-conformance test suite exists yet; the verification_objectives above are not machine-executed."
+  - "The instrument's SCPI error queue (if any) is never read by this driver; a command that the instrument silently rejects will not surface as a Python exception."
+  - "Single session only: no multi_connection capability, no alias argument on any method."
+
+planning_hints:
+  - "Always call init() (or use `with U1242C(...) as dmm:`) before any other method; every method except the constructor requires CONNECTED state."
+  - "get_conf() should be read before interpreting get_data()'s value, since the unit depends on the active configuration and is not returned separately."
+  - "reset() invalidates any assumption about the active configuration; call get_conf() again afterward if the configuration matters."
+  - "init() may block for up to 30 seconds when the battery is low; do not assume it returns quickly."
+
+unknown_handling: >
+  This driver reports indeterminate results only by raising the exceptions in
+  error_catalogue; it has no explicit UNKNOWN return value or WARNING-level
+  diagnostic for any capability. An agent that cannot get past init() or a
+  query without a raised exception has no other channel to detect an
+  indeterminate result. Do not treat an unraised call as a guarantee of a
+  meaningful reading beyond what verification_objectives above states.
+
+conformance_rules:
+  # Self-assessment against LPDS-017 §12. This driver is NOT declared
+  # AI-planning-ready per LPDS-015 §21.1; several rules are documented
+  # deviations rather than passes, per "limitations" above.
+  - rule: "1. all mandatory sections in §7 are present"
+    status: PASS
+  - rule: "2. identity fields match the LPDS-015 plugin manifest exactly"
+    status: NOT_APPLICABLE
+    rationale: "no LPDS-015 plugin manifest exists in this repository yet"
+  - rule: "3. every mandatory LPDS-002/LPDS-013 method has exactly one capability entry"
+    status: DEVIATION
+    rationale: "this driver does not implement the LPDS-002 mandatory universal method set; capability entries instead cover this driver's actual current public methods"
+  - rule: "4. every risk_level uses the LPDS-002 §16.1 scale"
+    status: PASS
+  - rule: "5. every capability_id matches the driver's LPDS-013 capability model"
+    status: NOT_APPLICABLE
+    rationale: "no LPDS-013 capability model is implemented; capability_id values are provisional"
+  - rule: "6. every state name is a valid LPDS-003 §13.1 state or documented sub-state"
+    status: PASS
+  - rule: "7. every error catalogue entry maps to an LPDS-007-aligned exception and code"
+    status: DEVIATION
+    rationale: "exception classes come from scpi_driver_core.exceptions, not an lpds-core/LPDS-007 hierarchy; codes are provisional, driver-local LPDS-<DOMAIN>-<NNN> identifiers"
+  - rule: "8. ai_contract.lock validates against the packaged ai_contract.yaml"
+    status: PASS
+  - rule: "9. no capability/safety rule/oracle contradicts the LPDS-013/LPDS-014 models"
+    status: NOT_APPLICABLE
+    rationale: "neither model is implemented"
+  - rule: "10. no field describes a test-automation-framework-specific binding"
+    status: PASS
